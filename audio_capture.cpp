@@ -3,24 +3,49 @@
 #include <chrono>
 #include <string>
 #include <cmath>
+#include <propkey.h>
+#include <propidl.h>
+#include <propsys.h>
+#include <fstream>
+#include <sstream>
 
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "mmdevapi.lib")
 
-const int WAVEFORM_BUFFER_SIZE = 2048;
+const int WAVEFORM_BUFFER_SIZE = 48000; // 1 second at 48kHz (reduced for performance)
 const REFERENCE_TIME REFTIMES_PER_SEC = 10000000;
 const REFERENCE_TIME REFTIMES_PER_MILLISEC = 10000;
+
+// Logging function
+void LogError(const char* message) {
+    try {
+        std::ofstream log("error_log.txt", std::ios::app);
+        auto now = std::chrono::system_clock::now();
+        auto time = std::chrono::system_clock::to_time_t(now);
+        log << "[" << std::ctime(&time) << "] " << message << std::endl;
+        log.close();
+    } catch (...) {
+        // Ignore logging errors
+    }
+}
 
 void ShowError(const wchar_t* message, HRESULT hr) {
     wchar_t buffer[256];
     swprintf_s(buffer, L"%s\nHRESULT: 0x%08X", message, hr);
     MessageBoxW(nullptr, buffer, L"Audio Capture Error", MB_OK | MB_ICONERROR);
+    
+    // Log the error
+    std::string logMsg = "ShowError called: ";
+    logMsg += std::string(message, message + wcslen(message));
+    logMsg += " HRESULT: 0x" + std::to_string(hr);
+    LogError(logMsg.c_str());
 }
 
 AudioCapture::AudioCapture()
 {
     m_waveformBuffer.resize(WAVEFORM_BUFFER_SIZE, 0.0f);
+    m_waveformBufferSize = WAVEFORM_BUFFER_SIZE;
 }
 
 AudioCapture::~AudioCapture()
@@ -61,14 +86,45 @@ bool AudioCapture::StopCapture()
 {
     if (!m_isCapturing) return true;
 
-    m_isCapturing = false;
-    if (m_captureThread && m_captureThread->joinable()) {
-        m_captureThread->join();
+    try {
+        m_isCapturing = false;
+        m_stopCapture = true;  // Signal thread to stop
+        
+        // Stop audio client immediately
+        if (m_audioClient) {
+            m_audioClient->Stop();
+        }
+        
+        // Wait for capture thread with timeout (max 500ms)
+        if (m_captureThread && m_captureThread->joinable()) {
+            // Try to join with timeout
+            auto waitStart = std::chrono::high_resolution_clock::now();
+            while (m_captureThread->joinable()) {
+                Sleep(10);
+                auto elapsed = std::chrono::high_resolution_clock::now() - waitStart;
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() > 500) {
+                    // Timeout - detach thread
+                    m_captureThread->detach();
+                    break;
+                }
+            }
+            
+            // Try final join if still joinable
+            if (m_captureThread->joinable()) {
+                m_captureThread->join();
+            }
+        }
+        
+        m_captureThread.reset();
+        m_stopCapture = false;
+        return true;
     }
-    m_captureThread.reset();
-
-    m_audioClient->Stop();
-    return true;
+    catch (const std::exception& e) {
+        // Log exception
+        LogError("Exception in StopCapture");
+        OutputDebugStringW(L"Exception in StopCapture\n");
+        return false;
+    }
 }
 
 bool AudioCapture::InitializeWASAPI()
@@ -85,13 +141,36 @@ bool AudioCapture::InitializeWASAPI()
         return false;
     }
 
-    // Get default audio endpoint (loopback for system audio capture)
-    // For system audio, we need to get the render device and use loopback
-    hr = m_deviceEnumerator->GetDefaultAudioEndpoint(
-        eRender, eConsole, m_device.GetAddressOf());
-    if (FAILED(hr)) {
-        ShowError(L"Failed to get default audio endpoint", hr);
-        return false;
+    // Use selected device if available, otherwise get default audio endpoint (loopback for system audio capture)
+    if (!m_deviceSelected) {
+        // For system audio, we need to get the render device and use loopback
+        hr = m_deviceEnumerator->GetDefaultAudioEndpoint(
+            eRender, eConsole, m_device.GetAddressOf());
+        if (FAILED(hr)) {
+            ShowError(L"Failed to get default audio endpoint", hr);
+            return false;
+        }
+        
+        // Set current device info for default device
+        m_currentDevice.index = -1; // Default device
+        m_currentDevice.name = L"Default System Device";
+        m_currentDevice.id = L"default";
+        m_currentDevice.isDefault = true;
+        m_deviceSelected = true; // Mark as selected to avoid re-initialization
+    }
+    // If m_deviceSelected is true, m_device should already be set in SelectAudioDevice()
+
+    // Debug: Write current device info
+    {
+        HANDLE debugFile = CreateFileW(L"init_debug.txt", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (debugFile != INVALID_HANDLE_VALUE) {
+            std::string debugText = "Initializing device: " + std::string(m_currentDevice.name.begin(), m_currentDevice.name.end()) + "\n";
+            debugText += "Device type: " + std::string(m_currentDeviceType == RenderDevices ? "Render" : "Capture") + "\n";
+            debugText += "Device index: " + std::to_string(m_currentDevice.index) + "\n";
+            DWORD written;
+            WriteFile(debugFile, debugText.c_str(), (DWORD)debugText.length(), &written, nullptr);
+            CloseHandle(debugFile);
+        }
     }
 
     // Create audio client
@@ -138,16 +217,23 @@ bool AudioCapture::InitializeWASAPI()
         }
     }
 
-    // Initialize audio client for capture (loopback)
+    // Initialize audio client for capture
+    DWORD streamFlags = 0;
+    if (m_currentDeviceType == RenderDevices) {
+        // For render devices, use loopback capture
+        streamFlags = AUDCLNT_STREAMFLAGS_LOOPBACK;
+    }
+    // For capture devices, use direct capture (no flags needed)
+
     hr = m_audioClient->Initialize(
         AUDCLNT_SHAREMODE_SHARED,
-        AUDCLNT_STREAMFLAGS_LOOPBACK,
+        streamFlags,
         REFTIMES_PER_SEC,
         0,
         &m_waveFormat,
         nullptr);
     if (FAILED(hr)) {
-        ShowError(L"Failed to initialize audio client for loopback capture", hr);
+        ShowError(L"Failed to initialize audio client for capture", hr);
         return false;
     }
 
@@ -341,11 +427,9 @@ void AudioCapture::RecordingThread()
                         for (UINT32 i = 0; i < numFramesAvailable; i++) {
                             float sample = pcmData[i * m_waveFormat.nChannels] / 32768.0f;
                             
-                            // Shift waveform buffer
-                            for (int j = 0; j < WAVEFORM_BUFFER_SIZE - 1; j++) {
-                                m_waveformBuffer[j] = m_waveformBuffer[j + 1];
-                            }
-                            m_waveformBuffer[WAVEFORM_BUFFER_SIZE - 1] = sample;
+                            // Use circular buffer instead of shifting
+                            m_waveformBuffer[m_waveformPos] = sample;
+                            m_waveformPos = (m_waveformPos + 1) % m_waveformBufferSize;
                             
                             m_sampleCount++;
                         }
@@ -368,12 +452,35 @@ void AudioCapture::CaptureThread()
     const DWORD flags = AUDCLNT_BUFFERFLAGS_SILENT;
     UINT32 nextPacketSize = 0;
 
-    while (m_isCapturing) {
+    // Debug counter
+    static int debugCounter = 0;
+    static int packetCounter = 0;
+
+    while (m_isCapturing && !m_stopCapture) {
+        // Early exit check
+        if (m_stopCapture) break;
+        
         Sleep(10); // Small delay to avoid busy waiting
 
         // Get size of next capture package
         HRESULT hr = m_captureClient->GetNextPacketSize(&nextPacketSize);
-        if (FAILED(hr)) continue;
+        if (FAILED(hr)) {
+            if (m_stopCapture) break;
+            continue;
+        }
+
+        // Debug: Write packet info every 100 iterations
+        debugCounter++;
+        if (debugCounter % 100 == 0) {
+            HANDLE debugFile = CreateFileW(L"capture_debug.txt", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (debugFile != INVALID_HANDLE_VALUE) {
+                std::string debugText = "Packets received: " + std::to_string(packetCounter) + "\n";
+                debugText += "Last packet size: " + std::to_string(nextPacketSize) + "\n";
+                DWORD written;
+                WriteFile(debugFile, debugText.c_str(), (DWORD)debugText.length(), &written, nullptr);
+                CloseHandle(debugFile);
+            }
+        }
 
         // Process all available packets
         while (nextPacketSize > 0) {
@@ -384,7 +491,38 @@ void AudioCapture::CaptureThread()
             hr = m_captureClient->GetBuffer(&data, &numFramesAvailable, &streamFlags, nullptr, nullptr);
             if (FAILED(hr)) break;
 
+            packetCounter++;
+
             if (!(streamFlags & AUDCLNT_BUFFERFLAGS_SILENT)) {
+                // Debug: Check if we have non-silent data
+                static int silentCounter = 0;
+                static int dataCounter = 0;
+                dataCounter++;
+                
+                if (dataCounter % 50 == 0) {  // Every 50th data packet
+                    HANDLE debugFile = CreateFileW(L"audio_data_debug.txt", GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                    if (debugFile != INVALID_HANDLE_VALUE) {
+                        std::string debugText = "Data packets: " + std::to_string(dataCounter) + "\n";
+                        debugText += "Silent packets: " + std::to_string(silentCounter) + "\n";
+                        debugText += "Frames available: " + std::to_string(numFramesAvailable) + "\n";
+                        debugText += "Channels: " + std::to_string(m_waveFormat.nChannels) + "\n";
+                        debugText += "Bits per sample: " + std::to_string(m_waveFormat.wBitsPerSample) + "\n";
+                        
+                        // Check first few samples
+                        if (m_waveFormat.wBitsPerSample == 16 && numFramesAvailable > 0) {
+                            int16_t* pcmData = (int16_t*)data;
+                            debugText += "First sample: " + std::to_string(pcmData[0]) + "\n";
+                            if (numFramesAvailable > 1) {
+                                debugText += "Second sample: " + std::to_string(pcmData[1]) + "\n";
+                            }
+                        }
+                        
+                        DWORD written;
+                        WriteFile(debugFile, debugText.c_str(), (DWORD)debugText.length(), &written, nullptr);
+                        CloseHandle(debugFile);
+                    }
+                }
+
                 // Update waveform buffer for visualization
                 {
                     std::lock_guard<std::mutex> lock(m_mutex);
@@ -404,6 +542,9 @@ void AudioCapture::CaptureThread()
                         }
                     }
                 }
+            } else {
+                static int silentCounter = 0;
+                silentCounter++;
             }
 
             m_captureClient->ReleaseBuffer(numFramesAvailable);
@@ -414,22 +555,226 @@ void AudioCapture::CaptureThread()
     }
 }
 
-std::vector<float> AudioCapture::GetWaveformBuffer() const
-{
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return m_waveformBuffer;
-}
+// Removed - use GetWaveformBuffer() pointer directly with GetWaveformMutex()
 
 float AudioCapture::GetCurrentLevel() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_waveformBuffer.empty()) return 0.0f;
     
-    // Calculate RMS of last 100 samples
-    const int numSamples = min(100, (int)m_waveformBuffer.size());
+    // Calculate RMS of last 2400 samples (50ms at 48kHz) or less if buffer is small
+    const int numSamples = min(2400, (int)m_waveformBuffer.size());
     float sum = 0.0f;
-    for (int i = m_waveformBuffer.size() - numSamples; i < m_waveformBuffer.size(); ++i) {
-        sum += m_waveformBuffer[i] * m_waveformBuffer[i];
+    
+    // Calculate from the last numSamples positions (accounting for circular buffer)
+    for (int i = 0; i < numSamples; i++) {
+        int idx = (m_waveformPos - numSamples + i + m_waveformBufferSize) % m_waveformBufferSize;
+        sum += m_waveformBuffer[idx] * m_waveformBuffer[idx];
     }
+    
     return sqrt(sum / numSamples);
 }
+
+std::vector<AudioCapture::AudioDevice> AudioCapture::EnumerateAudioDevices(DeviceType type)
+{
+    std::vector<AudioDevice> devices;
+    HRESULT hr;
+
+    if (!m_deviceEnumerator) {
+        hr = CoCreateInstance(
+            __uuidof(MMDeviceEnumerator), nullptr,
+            CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+            (void**)m_deviceEnumerator.GetAddressOf());
+        if (FAILED(hr)) {
+            ShowError(L"Failed to create device enumerator", hr);
+            return devices;
+        }
+    }
+
+    // Choose device type
+    EDataFlow dataFlow = (type == RenderDevices) ? eRender : eCapture;
+
+    // Enumerate devices
+    IMMDeviceCollection* collection = nullptr;
+    hr = m_deviceEnumerator->EnumAudioEndpoints(dataFlow, DEVICE_STATE_ACTIVE, &collection);
+    if (FAILED(hr)) {
+        ShowError(L"Failed to enumerate audio devices", hr);
+        return devices;
+    }
+
+    UINT count = 0;
+    collection->GetCount(&count);
+
+    // Debug output - write to file
+    std::wstring debugFileName = (type == RenderDevices) ? L"audio_devices_render_debug.txt" : L"audio_devices_capture_debug.txt";
+    HANDLE debugFile = CreateFileW(debugFileName.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (debugFile != INVALID_HANDLE_VALUE) {
+        std::string debugText = (type == RenderDevices) ? "Available Render Devices:\n" : "Available Capture Devices:\n";
+        DWORD written;
+        WriteFile(debugFile, debugText.c_str(), (DWORD)debugText.length(), &written, nullptr);
+    }
+
+    for (UINT i = 0; i < count; ++i) {
+        IMMDevice* device = nullptr;
+        hr = collection->Item(i, &device);
+        if (FAILED(hr)) continue;
+
+        // Get device properties
+        IPropertyStore* props = nullptr;
+        hr = device->OpenPropertyStore(STGM_READ, &props);
+        
+        std::wstring deviceName = L"Unknown Device";
+        
+        if (SUCCEEDED(hr)) {
+            // Try to get device friendly name
+            PROPVARIANT varName;
+            PropVariantInit(&varName);
+            
+            // PKEY_Device_FriendlyName GUID: {a45c254e-df1c-4efd-8020-67d146a850e0}, PID: 14
+            PROPERTYKEY keyFriendlyName = { 
+                {0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 
+                14 
+            };
+            
+            hr = props->GetValue(keyFriendlyName, &varName);
+            if (SUCCEEDED(hr) && varName.pwszVal) {
+                deviceName = varName.pwszVal;
+            }
+            PropVariantClear(&varName);
+        }
+
+        // Get default device to check if this one is default
+        IMMDevice* defaultDevice = nullptr;
+        bool isDefault = false;
+        if (SUCCEEDED(m_deviceEnumerator->GetDefaultAudioEndpoint(dataFlow, eConsole, &defaultDevice))) {
+            LPWSTR pszDefaultId = nullptr;
+            if (SUCCEEDED(defaultDevice->GetId(&pszDefaultId))) {
+                LPWSTR pszCurrentId = nullptr;
+                if (SUCCEEDED(device->GetId(&pszCurrentId))) {
+                    isDefault = (wcscmp(pszDefaultId, pszCurrentId) == 0);
+                    CoTaskMemFree(pszCurrentId);
+                }
+                CoTaskMemFree(pszDefaultId);
+            }
+            defaultDevice->Release();
+        }
+
+        AudioDevice audioDevice;
+        audioDevice.index = devices.size();
+        audioDevice.name = deviceName;
+        audioDevice.id = L"";
+        audioDevice.isDefault = isDefault;
+
+        devices.push_back(audioDevice);
+
+        // Debug output
+        if (debugFile != INVALID_HANDLE_VALUE) {
+            std::string debugLine = "Device " + std::to_string(i) + ": " + std::string(deviceName.begin(), deviceName.end()) + (isDefault ? " (Default)" : "") + "\n";
+            DWORD written;
+            WriteFile(debugFile, debugLine.c_str(), (DWORD)debugLine.length(), &written, nullptr);
+        }
+
+        if (props) {
+            props->Release();
+        }
+        device->Release();
+    }
+
+    if (debugFile != INVALID_HANDLE_VALUE) {
+        CloseHandle(debugFile);
+    }
+
+    collection->Release();
+    return devices;
+}
+
+bool AudioCapture::SelectAudioDevice(int deviceIndex, DeviceType type)
+{
+    try {
+        // Wait a bit for capture thread to actually stop (max 100ms with retries)
+        for (int retry = 0; retry < 10; retry++) {
+            if (!m_isCapturing && !m_isRecording) {
+                break;  // Safe to proceed
+            }
+            Sleep(10);
+        }
+        
+        if (m_isCapturing || m_isRecording) {
+            ShowError(L"Cannot select device while capturing or recording", S_OK);
+            return false;
+        }
+
+        // Get all devices
+        std::vector<AudioDevice> devices = EnumerateAudioDevices(type);
+        
+        if (deviceIndex < 0 || deviceIndex >= (int)devices.size()) {
+            ShowError(L"Invalid device index", S_OK);
+            return false;
+        }
+
+        HRESULT hr;
+
+        if (!m_deviceEnumerator) {
+            hr = CoCreateInstance(
+                __uuidof(MMDeviceEnumerator), nullptr,
+                CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                (void**)m_deviceEnumerator.GetAddressOf());
+            if (FAILED(hr)) {
+                ShowError(L"Failed to create device enumerator", hr);
+                return false;
+            }
+        }
+
+        // Choose device type
+        EDataFlow dataFlow = (type == RenderDevices) ? eRender : eCapture;
+
+        // Get device collection
+        IMMDeviceCollection* collection = nullptr;
+        hr = m_deviceEnumerator->EnumAudioEndpoints(dataFlow, DEVICE_STATE_ACTIVE, &collection);
+        if (FAILED(hr)) {
+            ShowError(L"Failed to enumerate audio devices", hr);
+            return false;
+        }
+
+        // Get specific device
+        IMMDevice* device = nullptr;
+        hr = collection->Item(deviceIndex, &device);
+        collection->Release();
+
+        if (FAILED(hr)) {
+            LogError("Failed to get audio device from collection");
+            ShowError(L"Failed to get audio device", hr);
+            return false;
+        }
+
+        // Release old device - do this carefully
+        LogError("Resetting audio client components");
+        m_captureClient.Reset();
+        m_audioClient.Reset();
+        m_device.Reset();
+
+        // Set new device
+        LogError("Setting new device and reinitializing WASAPI");
+        m_device = device;
+        m_currentDevice = devices[deviceIndex];
+        m_currentDeviceType = type;
+        m_deviceSelected = true;
+
+        // Reinitialize with new device
+        LogError("Calling InitializeWASAPI for new device");
+        if (!InitializeWASAPI()) {
+            LogError("InitializeWASAPI failed for new device");
+            ShowError(L"Failed to initialize with selected device", S_OK);
+            return false;
+        }
+
+        LogError("Successfully switched to new audio device");
+        return true;
+    }
+    catch (const std::exception& e) {
+        LogError("Exception caught in SelectAudioDevice");
+        OutputDebugStringW(L"Exception in SelectAudioDevice\n");
+        return false;
+    }
+}
+

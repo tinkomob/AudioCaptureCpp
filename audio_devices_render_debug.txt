@@ -1,0 +1,9 @@
+Available Render Devices:
+Device 0: VBMatrix In 6 (VB-Audio Matrix VAIO)
+Device 1: VBMatrix In 8 (VB-Audio Matrix VAIO)
+Device 2: VBMatrix In 1 (VB-Audio Matrix VAIO) (Default)
+Device 3: VBMatrix In 7 (VB-Audio Matrix VAIO)
+Device 4: VBMatrix In 3 (VB-Audio Matrix VAIO)
+Device 5: VBMatrix In 5 (VB-Audio Matrix VAIO)
+Device 6: VBMatrix In 4 (VB-Audio Matrix VAIO)
+Device 7: VBMatrix In 2 (VB-Audio Matrix VAIO)

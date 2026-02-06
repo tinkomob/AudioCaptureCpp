@@ -1,0 +1,54 @@
+[Fri Feb  6 16:02:01 2026
+] Resetting audio client components
+[Fri Feb  6 16:02:01 2026
+] Setting new device and reinitializing WASAPI
+[Fri Feb  6 16:02:01 2026
+] Calling InitializeWASAPI for new device
+[Fri Feb  6 16:02:01 2026
+] Successfully switched to new audio device
+[Fri Feb  6 16:02:12 2026
+] Resetting audio client components
+[Fri Feb  6 16:02:12 2026
+] Setting new device and reinitializing WASAPI
+[Fri Feb  6 16:02:12 2026
+] Calling InitializeWASAPI for new device
+[Fri Feb  6 16:02:12 2026
+] Successfully switched to new audio device
+[Fri Feb  6 16:02:15 2026
+] Resetting audio client components
+[Fri Feb  6 16:02:15 2026
+] Setting new device and reinitializing WASAPI
+[Fri Feb  6 16:02:15 2026
+] Calling InitializeWASAPI for new device
+[Fri Feb  6 16:02:15 2026
+] Successfully switched to new audio device
+[Fri Feb  6 16:03:29 2026
+] Resetting audio client components
+[Fri Feb  6 16:03:29 2026
+] Setting new device and reinitializing WASAPI
+[Fri Feb  6 16:03:29 2026
+] Calling InitializeWASAPI for new device
+[Fri Feb  6 16:06:59 2026
+] Resetting audio client components
+[Fri Feb  6 16:06:59 2026
+] Setting new device and reinitializing WASAPI
+[Fri Feb  6 16:06:59 2026
+] Calling InitializeWASAPI for new device
+[Fri Feb  6 16:06:59 2026
+] Successfully switched to new audio device
+[Fri Feb  6 16:07:36 2026
+] Resetting audio client components
+[Fri Feb  6 16:07:36 2026
+] Setting new device and reinitializing WASAPI
+[Fri Feb  6 16:07:36 2026
+] Calling InitializeWASAPI for new device
+[Fri Feb  6 16:07:36 2026
+] Successfully switched to new audio device
+[Fri Feb  6 16:07:38 2026
+] Resetting audio client components
+[Fri Feb  6 16:07:38 2026
+] Setting new device and reinitializing WASAPI
+[Fri Feb  6 16:07:38 2026
+] Calling InitializeWASAPI for new device
+[Fri Feb  6 16:07:38 2026
+] Successfully switched to new audio device

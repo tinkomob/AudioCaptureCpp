@@ -1,0 +1,9 @@
+Available Capture Devices:
+Device 0: VBMatrix Out 1 (VB-Audio Matrix VAIO) (Default)
+Device 1: VBMatrix Out 7 (VB-Audio Matrix VAIO)
+Device 2: VBMatrix Out 4 (VB-Audio Matrix VAIO)
+Device 3: VBMatrix Out 5 (VB-Audio Matrix VAIO)
+Device 4: VBMatrix Out 2 (VB-Audio Matrix VAIO)
+Device 5: VBMatrix Out 3 (VB-Audio Matrix VAIO)
+Device 6: VBMatrix Out 8 (VB-Audio Matrix VAIO)
+Device 7: VBMatrix Out 6 (VB-Audio Matrix VAIO)

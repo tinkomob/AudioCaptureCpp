@@ -1,0 +1,3 @@
+Initializing device: VBMatrix Out 1 (VB-Audio Matrix VAIO)
+Device type: Capture
+Device index: 0

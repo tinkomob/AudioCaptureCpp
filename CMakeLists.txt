@@ -18,6 +18,7 @@ target_link_libraries(AudioCaptureCpp PRIVATE
     ole32
     mmdevapi
     winmm
+    propsys
 )
 
 # Set as Windows application (no console)

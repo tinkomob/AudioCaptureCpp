@@ -1,0 +1,2 @@
+Packets received: 7270
+Last packet size: 480
