@@ -1,7 +1,7 @@
-Data packets: 7350
+Data packets: 300
 Silent packets: 0
 Frames available: 480
 Channels: 2
 Bits per sample: 16
-First sample: 1
-Second sample: 0
+First sample: 0
+Second sample: 1

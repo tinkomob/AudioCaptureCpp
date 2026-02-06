@@ -52,3 +52,11 @@
 ] Calling InitializeWASAPI for new device
 [Fri Feb  6 16:07:38 2026
 ] Successfully switched to new audio device
+[Fri Feb  6 16:20:02 2026
+] Resetting audio client components
+[Fri Feb  6 16:20:02 2026
+] Setting new device and reinitializing WASAPI
+[Fri Feb  6 16:20:02 2026
+] Calling InitializeWASAPI for new device
+[Fri Feb  6 16:20:02 2026
+] Successfully switched to new audio device

@@ -93,6 +93,7 @@ bool AudioCapture::StopCapture()
         // Stop audio client immediately
         if (m_audioClient) {
             m_audioClient->Stop();
+            m_audioClient->Reset();
         }
         
         // Wait for capture thread with timeout (max 500ms)
@@ -280,13 +281,6 @@ bool AudioCapture::StartRecording(const wchar_t* filename)
     m_waveformPos = 0;
     m_isRecording = true;
 
-    // Start audio client
-    HRESULT hr = m_audioClient->Start();
-    if (FAILED(hr)) {
-        m_isRecording = false;
-        return false;
-    }
-
     // Start recording thread
     m_recordingThread = std::make_unique<std::thread>([this]() { RecordingThread(); });
 
@@ -298,11 +292,6 @@ bool AudioCapture::StopRecording()
     if (!m_isRecording) return false;
 
     m_isRecording = false;
-
-    // Stop audio client
-    if (m_audioClient) {
-        m_audioClient->Stop();
-    }
 
     // Wait for thread
     if (m_recordingThread && m_recordingThread->joinable()) {

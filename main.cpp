@@ -35,11 +35,10 @@ void StartRecording() {
     filename += std::to_wstring(g_recordingCount);
     filename += L".wav";
 
-    if (g_audioCapture.StartRecording(filename.c_str())) {
+    if (g_audioCapture.StartCapture() && g_audioCapture.StartRecording(filename.c_str())) {
         g_isRecording = true;
         SetWindowTextW(hwndStatusLabel, L"Status: Recording...");
-        EnableWindow(hwndStartButton, FALSE);
-        EnableWindow(hwndStopButton, TRUE);
+        SetWindowTextW(hwndStopButton, L"Stop Recording");
     }
 }
 
@@ -48,15 +47,37 @@ void StopRecording() {
 
     g_isRecording = false;
     g_audioCapture.StopRecording();
+    g_audioCapture.StopCapture();
 
-    SetWindowTextW(hwndStatusLabel, L"Status: Ready");
-    EnableWindow(hwndStartButton, TRUE);
-    EnableWindow(hwndStopButton, FALSE);
+    SetWindowTextW(hwndStatusLabel, L"Status: Stopped");
+    SetWindowTextW(hwndStopButton, L"Resume Recording");
+}
+
+void ToggleRecording() {
+    if (g_isRecording) {
+        StopRecording();
+    } else {
+        StartRecording();
+    }
 }
 
 void RefreshDeviceList() {
     // Clear existing items
     SendMessageW(hwndDeviceCombo, CB_RESETCONTENT, 0, 0);
+
+    // Stop recording and capturing before switching device types
+    bool wasRecording = g_isRecording;
+    bool wasCapturing = g_audioCapture.IsCapturing();
+    
+    if (wasRecording) {
+        StopRecording();
+        Sleep(100);
+    }
+    
+    if (wasCapturing) {
+        g_audioCapture.StopCapture();
+        Sleep(100);
+    }
 
     // Determine device type
     AudioCapture::DeviceType deviceType = AudioCapture::RenderDevices;
@@ -80,6 +101,17 @@ void RefreshDeviceList() {
     if (SendMessageW(hwndDeviceCombo, CB_GETCOUNT, 0, 0) > 0) {
         SendMessageW(hwndDeviceCombo, CB_SETCURSEL, 0, 0);
     }
+    
+    // Resume capturing and recording if they were active
+    if (wasCapturing) {
+        if (!g_audioCapture.StartCapture()) {
+            MessageBoxW(hwndMainWindow, L"Failed to restart audio capture", L"Error", MB_OK | MB_ICONERROR);
+        }
+    }
+    
+    if (wasRecording && wasCapturing) {
+        StartRecording();
+    }
 }
 
 void SelectAudioDevice() {
@@ -94,8 +126,15 @@ void SelectAudioDevice() {
         deviceType = AudioCapture::CaptureDevices;
     }
 
-    // Need to stop capturing first to change device
+    // Need to stop recording and capturing first to change device
+    bool wasRecording = g_isRecording;
     bool wasCapturing = g_audioCapture.IsCapturing();
+    
+    if (wasRecording) {
+        StopRecording();
+        Sleep(100);  // Give it time to stop
+    }
+    
     if (wasCapturing) {
         g_audioCapture.StopCapture();
         Sleep(100);  // Give it time to stop
@@ -117,12 +156,20 @@ void SelectAudioDevice() {
                     MessageBoxW(hwndMainWindow, L"Failed to restart audio capture", L"Error", MB_OK | MB_ICONERROR);
                 }
             }
+            
+            // Resume recording if it was active
+            if (wasRecording && wasCapturing) {
+                StartRecording();
+            }
         } else {
             MessageBoxW(hwndMainWindow, L"Failed to select audio device", L"Error", MB_OK | MB_ICONERROR);
             
             // Try to resume with previous device
             if (wasCapturing) {
                 g_audioCapture.StartCapture();
+            }
+            if (wasRecording && wasCapturing) {
+                StartRecording();
             }
         }
     }
@@ -368,20 +415,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             hwndWaveformCanvas = CreateWindowW(L"WaveformCanvas", nullptr,
                 WS_CHILD | WS_VISIBLE, 10, 210, 980, 300, hwnd, nullptr, nullptr, nullptr);
 
-            // Start button
-            hwndStartButton = CreateWindowW(L"BUTTON", L"Start Recording",
-                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 10, 520, 120, 30,
-                hwnd, (HMENU)1, nullptr, nullptr);
-
-            // Stop button
+            // Stop/Resume button (centered)
             hwndStopButton = CreateWindowW(L"BUTTON", L"Stop Recording",
-                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_DISABLED, 140, 520, 120, 30,
+                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 440, 520, 120, 30,
                 hwnd, (HMENU)2, nullptr, nullptr);
-
-            // Exit button
-            CreateWindowW(L"BUTTON", L"Close",
-                WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 270, 520, 120, 30,
-                hwnd, (HMENU)3, nullptr, nullptr);
 
             return 0;
         }
@@ -391,9 +428,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int code = HIWORD(wParam);
             
             switch (id) {
-                case 1: StartRecording(); break;
-                case 2: StopRecording(); break;
-                case 3: PostMessage(hwnd, WM_CLOSE, 0, 0); break;
+                case 2: ToggleRecording(); break;
                 case 4: // Device combo box
                     if (code == CBN_SELCHANGE) {
                         SelectAudioDevice();
@@ -494,6 +529,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR pCmdLin
     labelText += currentDevice.name;
     labelText += (currentType == AudioCapture::RenderDevices) ? L" (Playback)" : L" (Recording)";
     SetWindowTextW(hwndCurrentDeviceLabel, labelText.c_str());
+
+    // Start recording automatically
+    StartRecording();
 
     // Message loop
     MSG msg = {};
