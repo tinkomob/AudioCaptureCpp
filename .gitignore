@@ -1,0 +1,77 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+bin/
+obj/
+
+# Visual Studio
+*.vcxproj.user
+*.vcxproj.filters
+*.sln
+.vs/
+.vscode/
+*.suo
+*.user
+*.aps
+*.pch
+*.vspscc
+*_i.c
+*_p.c
+*.ncb
+*.suo
+*.tlb
+*.tlh
+*.tmp
+*.tmp_proj
+*.log
+*.vspscc
+*.vssscc
+.builds
+*.pidb
+*.log
+*.svclog
+*.scc
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+
+# Executables and libraries
+*.exe
+*.dll
+*.lib
+*.a
+*.so
+*.dylib
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Audio files (generated)
+*.wav
